@@ -9,12 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@google/genai": "^1.45.0",
+    "@google/generative-ai": "^0.24.1",
     "@langchain/openai": "^1.2.13",
     "@langchain/textsplitters": "^1.0.1",
     "@supabase/supabase-js": "^2.99.2",
     "langchain": "^1.2.32",
     "mammoth": "^1.12.0",
-    "next": "16.1.6",
+    "next": "^16.1.7",
     "openai": "^6.29.0",
     "pdf2json": "^4.0.2",
     "react": "19.2.3",

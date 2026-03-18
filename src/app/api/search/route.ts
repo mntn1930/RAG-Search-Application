@@ -1,61 +1,68 @@
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 import { NextResponse } from 'next/server';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY!
 );
-const openai = new OpenAI();
+const genAI = new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY! });
 
 export async function POST(req: Request) {
   try {
-    const { query } = await req.json();
+  const { query } = await req.json();
 
-    // Generate embedding for the user's query
-    // This converts the search query into the same vector space as document chunks
-    const emb = await openai.embeddings.create({ 
-      model: 'text-embedding-3-small', 
-      input: query 
-    });
+  // Embedding avec Gemini
 
-    // Find similar documents using vector similarity search
-    // The match_documents function finds the 5 most similar chunks
-    const { data: results, error } = await supabase.rpc('match_documents', {
-      query_embedding: JSON.stringify(emb.data[0].embedding),
-      match_threshold: 0.0,  // Accept any similarity (you can increase this for stricter matching)
-      match_count: 5,        // Return top 5 most similar chunks
-    });
+  const emb = await genAI.models.embedContent({
+  model: 'gemini-embedding-001',
+  contents: query,
+  config: {
+    outputDimensionality: 1536,
+  },
+});
+const queryEmbedding = emb.embeddings?.[0]?.values;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!queryEmbedding) {
+      return NextResponse.json(
+        { error: 'Failed to generate query embedding' },
+        { status: 500 }
+      );
     }
 
-    // Combine retrieved chunks into context
-    // These chunks will be used as context for the AI to generate an answer
-    const context = results?.map((r: any) => r.content).join('\n---\n') || '';
 
-    // Generate answer using OpenAI with retrieved context
-    // This is the "Generation" part of RAG
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { 
-          role: 'system', 
-          content: 'You are a helpful assistant. Use the provided context to answer questions. If the answer is not in the context, say you do not know.' 
-        },
-        { 
-          role: 'user', 
-          content: `Context: ${context}\n\nQuestion: ${query}` 
-        }
-      ],
-    });
+  // Recherche vectorielle
+  const { data: results, error } = await supabase.rpc('match_documents', {
+    query_embedding: queryEmbedding,
+    match_threshold: 0.0,
+    match_count: 5,
+  });
 
-    return NextResponse.json({ 
-      answer: completion.choices[0].message.content, 
-      sources: results 
-    });
-  } catch (error: any) {
+  if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  const context = results?.map((r: any) => r.content).join('\n---\n') || '';
+
+  const generationResponse = await genAI.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: `Context:
+${context}
+
+Question:
+${query}`,
+      config: {
+        systemInstruction:
+          'You are a helpful assistant. Use the provided context to answer questions. If the answer is not in the context, say you do not know.',
+      },
+    });
+
+  return NextResponse.json({
+    answer: generationResponse.text,
+    sources: results,
+  });
+
+} catch (error: any) {
+  return NextResponse.json({ error: error.message }, { status: 500 });
+}
 }
